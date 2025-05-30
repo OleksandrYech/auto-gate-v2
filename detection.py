@@ -10,12 +10,77 @@ import logging
 import json
 from typing import List, Tuple, Optional, Dict
 from pathlib import Path
-from dataclass import Detection
+from dataclasses import dataclass
 
 from config import MODEL_CONFIG, CONFIG_DIR, SYSTEM_CONFIG
 
 logger = logging.getLogger(__name__)
 
+
+@dataclass
+class Detection:
+    """Клас для збереження результатів детекції"""
+    bbox: Tuple[int, int, int, int]  # x1, y1, x2, y2
+    confidence: float
+    class_name: str = ""
+    text: str = ""
+
+
+class ROIManager:
+    """Менеджер для роботи з зонами інтересу (ROI)"""
+
+    def __init__(self):
+        """Ініціалізація менеджера ROI"""
+        self.roi_configs = {}
+        self._load_roi_configs()
+
+    def _load_roi_configs(self):
+        """Завантажити конфігурації ROI"""
+        for camera_type in ["ENTRANCE", "EXIT"]:
+            roi_file = CONFIG_DIR / f"roi_{camera_type.lower()}.json"
+            if roi_file.exists():
+                try:
+                    with open(roi_file, 'r') as f:
+                        self.roi_configs[camera_type] = json.load(f)
+                    logger.info(f"ROI для {camera_type} завантажено")
+                except Exception as e:
+                    logger.error(f"Помилка завантаження ROI для {camera_type}: {e}")
+            else:
+                logger.warning(f"ROI для {camera_type} не знайдено, використовуємо весь кадр")
+
+    def apply_roi(self, image: np.ndarray, camera_type: str) -> Tuple[np.ndarray, Tuple[int, int]]:
+        """Застосувати ROI до зображення"""
+        if camera_type not in self.roi_configs:
+            return image, (0, 0)
+
+        roi = self.roi_configs[camera_type]
+        x1, y1, x2, y2 = roi['x1'], roi['y1'], roi['x2'], roi['y2']
+
+        # Обрізаємо зображення
+        cropped = image[y1:y2, x1:x2]
+        return cropped, (x1, y1)
+
+    def get_roi_mask(self, image_shape: Tuple[int, int], camera_type: str) -> Optional[np.ndarray]:
+        """Отримати маску ROI"""
+        if camera_type not in self.roi_configs:
+            return None
+
+        h, w = image_shape[:2]
+        mask = np.zeros((h, w), dtype=np.uint8)
+        roi = self.roi_configs[camera_type]
+
+        # Створюємо маску з полігону або прямокутника
+        if 'polygon' in roi:
+            pts = np.array(roi['polygon'], np.int32)
+            cv2.fillPoly(mask, [pts], 255)
+        else:
+            x1, y1, x2, y2 = roi['x1'], roi['y1'], roi['x2'], roi['y2']
+            mask[y1:y2, x1:x2] = 255
+
+        return mask
+
+
+class VehicleDetector:
     """Детектор автомобілів на основі MobileNet SSD"""
 
     def __init__(self):
@@ -450,74 +515,4 @@ class DetectionPipeline:
             cv2.imwrite(str(filename), annotated)
 
         except Exception as e:
-            logger.error(f"Помилка збереження зображення: {e}")es import dataclass
-
-from config import MODEL_CONFIG, CONFIG_DIR, SYSTEM_CONFIG
-
-logger = logging.getLogger(__name__)
-
-
-@dataclass
-class Detection:
-    """Клас для збереження результатів детекції"""
-    bbox: Tuple[int, int, int, int]  # x1, y1, x2, y2
-    confidence: float
-    class_name: str = ""
-    text: str = ""
-
-
-class ROIManager:
-    """Менеджер для роботи з зонами інтересу (ROI)"""
-
-    def __init__(self):
-        """Ініціалізація менеджера ROI"""
-        self.roi_configs = {}
-        self._load_roi_configs()
-
-    def _load_roi_configs(self):
-        """Завантажити конфігурації ROI"""
-        for camera_type in ["ENTRANCE", "EXIT"]:
-            roi_file = CONFIG_DIR / f"roi_{camera_type.lower()}.json"
-            if roi_file.exists():
-                try:
-                    with open(roi_file, 'r') as f:
-                        self.roi_configs[camera_type] = json.load(f)
-                    logger.info(f"ROI для {camera_type} завантажено")
-                except Exception as e:
-                    logger.error(f"Помилка завантаження ROI для {camera_type}: {e}")
-            else:
-                logger.warning(f"ROI для {camera_type} не знайдено, використовуємо весь кадр")
-
-    def apply_roi(self, image: np.ndarray, camera_type: str) -> Tuple[np.ndarray, Tuple[int, int]]:
-        """Застосувати ROI до зображення"""
-        if camera_type not in self.roi_configs:
-            return image, (0, 0)
-
-        roi = self.roi_configs[camera_type]
-        x1, y1, x2, y2 = roi['x1'], roi['y1'], roi['x2'], roi['y2']
-
-        # Обрізаємо зображення
-        cropped = image[y1:y2, x1:x2]
-        return cropped, (x1, y1)
-
-    def get_roi_mask(self, image_shape: Tuple[int, int], camera_type: str) -> Optional[np.ndarray]:
-        """Отримати маску ROI"""
-        if camera_type not in self.roi_configs:
-            return None
-
-        h, w = image_shape[:2]
-        mask = np.zeros((h, w), dtype=np.uint8)
-        roi = self.roi_configs[camera_type]
-
-        # Створюємо маску з полігону або прямокутника
-        if 'polygon' in roi:
-            pts = np.array(roi['polygon'], np.int32)
-            cv2.fillPoly(mask, [pts], 255)
-        else:
-            x1, y1, x2, y2 = roi['x1'], roi['y1'], roi['x2'], roi['y2']
-            mask[y1:y2, x1:x2] = 255
-
-        return mask
-
-
-class
+            logger.error(f"Помилка збереження зображення: {e}")es
