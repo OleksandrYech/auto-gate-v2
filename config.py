@@ -28,13 +28,13 @@ GPIO_CONFIG = {
 CAMERA_CONFIG = {
     "ENTRANCE": {
         "name": "imx708",
-        "resolution": (1920, 1080),
+        "resolution": (1280, 720),
         "fps": 30,
         "roi_file": CONFIG_DIR / "roi_entrance.json"
     },
     "EXIT": {
         "name": "imx219",
-        "resolution": (1920, 1080),
+        "resolution": (1280, 720),
         "fps": 30,
         "roi_file": CONFIG_DIR / "roi_exit.json"
     }
@@ -78,7 +78,7 @@ GOOGLE_SHEETS_CONFIG = {
 # Ультразвуковий датчик
 ULTRASONIC_CONFIG = {
     "normal_distance": 100,      # Нормальна відстань в см
-    "detection_threshold": 80,   # Поріг детекції машини в см
+    "detection_threshold": 70,   # Поріг детекції машини в см
     "measurement_timeout": 0.1,  # Таймаут вимірювання в секундах
     "samples": 3                 # Кількість вимірювань для усереднення
 }
