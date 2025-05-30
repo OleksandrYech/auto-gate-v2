@@ -10,7 +10,7 @@ import logging
 import json
 from typing import List, Tuple, Optional, Dict
 from pathlib import Path
-from dataclass import Detection:
+from dataclass import VehicleDetector:
 
 from config import MODEL_CONFIG, CONFIG_DIR, SYSTEM_CONFIG
 
