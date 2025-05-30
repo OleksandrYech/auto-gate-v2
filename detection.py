@@ -10,7 +10,12 @@ import logging
 import json
 from typing import List, Tuple, Optional, Dict
 from pathlib import Path
-from dataclass VehicleDetector:
+from dataclass import Detection:
+
+from config import MODEL_CONFIG, CONFIG_DIR, SYSTEM_CONFIG
+
+logger = logging.getLogger(__name__)
+
     """Детектор автомобілів на основі MobileNet SSD"""
 
     def __init__(self):
