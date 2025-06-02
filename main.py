@@ -16,7 +16,7 @@ from gate_controller import GateController, SafetyMonitor
 from detection import DetectionPipeline
 from google_sheets import GoogleSheetsManager
 from processes import ProcessManager
-from config import LOGGING_CONFIG, SYSTEM_CONFIG
+from config import LOGGING_CONFIG, SYSTEM_CONFIG, GPIO_CONFIG
 
 
 # Налаштування логування

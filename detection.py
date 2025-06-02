@@ -11,6 +11,7 @@ import json
 from typing import List, Tuple, Optional, Dict
 from pathlib import Path
 from dataclasses import dataclass
+from datetime import datetime
 
 from config import MODEL_CONFIG, CONFIG_DIR, SYSTEM_CONFIG
 
@@ -515,4 +516,4 @@ class DetectionPipeline:
             cv2.imwrite(str(filename), annotated)
 
         except Exception as e:
-            logger.error(f"Помилка збереження зображення: {e}")es
+            logger.error(f"Помилка збереження зображення: {e}")
