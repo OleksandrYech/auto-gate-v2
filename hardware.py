@@ -9,8 +9,9 @@ import time
 import logging
 import threading
 from typing import Optional, Tuple
-import RPi.GPIO as GPIO
 import numpy as np
+from gpiozero import OutputDevice, InputDevice, DistanceSensor
+from gpiozero.pins.native import NativeFactory
 from picamera2 import Picamera2
 from libcamera import controls
 
@@ -18,62 +19,78 @@ from config import GPIO_CONFIG, ULTRASONIC_CONFIG, TIMING_CONFIG, CAMERA_CONFIG
 
 logger = logging.getLogger(__name__)
 
+# Використовуємо нативний драйвер для Raspberry Pi 5
+from gpiozero import Device
+Device.pin_factory = NativeFactory()
+
 
 class GPIOController:
     """Контролер для роботи з GPIO пінами"""
 
     def __init__(self):
         """Ініціалізація GPIO"""
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setwarnings(False)
+        try:
+            # Налаштування пінів реле як виходи
+            self.open_relay = OutputDevice(GPIO_CONFIG["OPEN_RELAY"], active_high=True, initial_value=False)
+            self.close_relay = OutputDevice(GPIO_CONFIG["CLOSE_RELAY"], active_high=True, initial_value=False)
 
-        # Налаштування пінів реле як виходи
-        GPIO.setup(GPIO_CONFIG["OPEN_RELAY"], GPIO.OUT, initial=GPIO.LOW)
-        GPIO.setup(GPIO_CONFIG["CLOSE_RELAY"], GPIO.OUT, initial=GPIO.LOW)
+            # Налаштування герконового датчика як вхід
+            # pull_up=True означає що коли контакт розімкнутий, читається HIGH
+            self.magnetic_sensor = InputDevice(GPIO_CONFIG["MAGNETIC_SENSOR"], pull_up=True)
 
-        # Налаштування герконового датчика як вхід з підтягуючим резистором
-        GPIO.setup(GPIO_CONFIG["MAGNETIC_SENSOR"], GPIO.IN, pull_up_down=GPIO.PUD_UP)
+            logger.info("GPIO ініціалізовано")
 
-        # Налаштування ультразвукового датчика
-        GPIO.setup(GPIO_CONFIG["ULTRASONIC_TRIG"], GPIO.OUT, initial=GPIO.LOW)
-        GPIO.setup(GPIO_CONFIG["ULTRASONIC_ECHO"], GPIO.IN)
+        except Exception as e:
+            logger.error(f"Помилка ініціалізації GPIO: {e}")
+            raise
 
-        logger.info("GPIO ініціалізовано")
-
-    def pulse_relay(self, relay_pin: int, duration: float = None):
+    def pulse_relay(self, relay_type: str, duration: float = None):
         """Подати імпульс на реле"""
         if duration is None:
             duration = TIMING_CONFIG["relay_pulse_duration"]
 
         try:
-            GPIO.output(relay_pin, GPIO.HIGH)
-            logger.debug(f"Реле {relay_pin} увімкнено")
+            if relay_type == "open":
+                relay = self.open_relay
+            elif relay_type == "close":
+                relay = self.close_relay
+            else:
+                raise ValueError(f"Невідомий тип реле: {relay_type}")
+
+            relay.on()
+            logger.debug(f"Реле {relay_type} увімкнено")
             time.sleep(duration)
-            GPIO.output(relay_pin, GPIO.LOW)
-            logger.debug(f"Реле {relay_pin} вимкнено")
+            relay.off()
+            logger.debug(f"Реле {relay_type} вимкнено")
+
         except Exception as e:
-            logger.error(f"Помилка керування реле {relay_pin}: {e}")
+            logger.error(f"Помилка керування реле {relay_type}: {e}")
             raise
 
     def open_gate(self):
         """Відкрити ворота"""
         logger.info("Відкриття воріт")
-        self.pulse_relay(GPIO_CONFIG["OPEN_RELAY"])
+        self.pulse_relay("open")
 
     def close_gate(self):
         """Закрити ворота"""
         logger.info("Закриття воріт")
-        self.pulse_relay(GPIO_CONFIG["CLOSE_RELAY"])
+        self.pulse_relay("close")
 
     def is_gate_open(self) -> bool:
         """Перевірити чи відкриті ворота"""
-        # Магніт зімкнутий (LOW) = ворота відкриті
-        return GPIO.input(GPIO_CONFIG["MAGNETIC_SENSOR"]) == GPIO.LOW
+        # Магніт зімкнутий (is_active=False через pull_up) = ворота відкриті
+        return not self.magnetic_sensor.is_active
 
     def cleanup(self):
         """Очистити GPIO"""
-        GPIO.cleanup()
-        logger.info("GPIO очищено")
+        try:
+            self.open_relay.close()
+            self.close_relay.close()
+            self.magnetic_sensor.close()
+            logger.info("GPIO очищено")
+        except Exception as e:
+            logger.error(f"Помилка очищення GPIO: {e}")
 
 
 class UltrasonicSensor:
@@ -87,56 +104,35 @@ class UltrasonicSensor:
         self.samples = ULTRASONIC_CONFIG["samples"]
         self._lock = threading.Lock()
 
-        logger.info("Ультразвуковий датчик ініціалізовано")
-
-    def _measure_once(self) -> Optional[float]:
-        """Одне вимірювання відстані"""
         try:
-            # Очищаємо тригер
-            GPIO.output(self.trig_pin, GPIO.LOW)
-            time.sleep(0.002)
-
-            # Генеруємо імпульс
-            GPIO.output(self.trig_pin, GPIO.HIGH)
-            time.sleep(0.00001)  # 10 мкс
-            GPIO.output(self.trig_pin, GPIO.LOW)
-
-            # Чекаємо на відповідь
-            pulse_start = time.time()
-            timeout_start = pulse_start
-
-            while GPIO.input(self.echo_pin) == GPIO.LOW:
-                pulse_start = time.time()
-                if pulse_start - timeout_start > self.timeout:
-                    return None
-
-            pulse_end = time.time()
-            timeout_start = pulse_end
-
-            while GPIO.input(self.echo_pin) == GPIO.HIGH:
-                pulse_end = time.time()
-                if pulse_end - timeout_start > self.timeout:
-                    return None
-
-            # Обчислюємо відстань
-            pulse_duration = pulse_end - pulse_start
-            distance = pulse_duration * 17150  # Швидкість звуку / 2
-
-            return round(distance, 2)
-
+            # Використовуємо DistanceSensor з gpiozero
+            self.sensor = DistanceSensor(
+                echo=self.echo_pin,
+                trigger=self.trig_pin,
+                max_distance=4,  # максимальна відстань 4 метри
+                threshold_distance=ULTRASONIC_CONFIG["detection_threshold"] / 100  # в метрах
+            )
+            logger.info("Ультразвуковий датчик ініціалізовано")
         except Exception as e:
-            logger.error(f"Помилка вимірювання відстані: {e}")
-            return None
+            logger.error(f"Помилка ініціалізації ультразвукового датчика: {e}")
+            raise
 
     def get_distance(self) -> Optional[float]:
-        """Отримати усереднену відстань"""
+        """Отримати усереднену відстань в сантиметрах"""
         with self._lock:
             distances = []
 
             for _ in range(self.samples):
-                distance = self._measure_once()
-                if distance is not None and 2 < distance < 400:  # Діапазон JSN-SR04T
-                    distances.append(distance)
+                try:
+                    # distance повертає значення в метрах
+                    distance_m = self.sensor.distance
+                    if distance_m is not None:
+                        distance_cm = distance_m * 100  # конвертуємо в сантиметри
+                        if 2 < distance_cm < 400:  # Діапазон JSN-SR04T
+                            distances.append(distance_cm)
+                except Exception as e:
+                    logger.debug(f"Помилка вимірювання: {e}")
+
                 time.sleep(0.05)  # Затримка між вимірюваннями
 
             if not distances:
@@ -157,6 +153,13 @@ class UltrasonicSensor:
             return False
 
         return distance < ULTRASONIC_CONFIG["detection_threshold"]
+
+    def cleanup(self):
+        """Очистити ресурси"""
+        try:
+            self.sensor.close()
+        except Exception as e:
+            logger.error(f"Помилка очищення ультразвукового датчика: {e}")
 
 
 class CameraController:
@@ -257,4 +260,5 @@ class HardwareManager:
         """Очистити всі ресурси"""
         logger.info("Очищення ресурсів обладнання")
         self.camera.cleanup()
+        self.ultrasonic.cleanup()
         self.gpio.cleanup()
